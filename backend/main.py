@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import connect_db, close_db
-from routes import tournaments, players, matches, game, leaderboard, bots, player_api
+from routes import tournaments, players, matches, game, leaderboard, bots, player_api, auth
 
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ app.include_router(game.router)
 app.include_router(leaderboard.router)
 app.include_router(bots.router)
 app.include_router(player_api.router)
+app.include_router(auth.router)
 
 
 @app.get("/")

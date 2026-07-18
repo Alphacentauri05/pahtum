@@ -1,17 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import {
     getTournament, getPlayers, getBots, registerForTournament, registerBotForTournament,
     updateTournamentStatus, generateBracket, generateGroups, getStandings,
     advanceToPhase2, startPhase2, swapBot,
-    newGame, makeMove, getAiMove, botStep, updateMatchResult
+    newGame, makeMove, getAiMove, botStep, updateMatchResult, unregisterFromTournament
 } from '../api'
 import { HiOutlineTrophy, HiOutlineUserPlus, HiOutlineCpuChip } from 'react-icons/hi2'
+import { Trash2 } from 'lucide-react'
 import GameBoard from '../components/GameBoard'
 import WinPredictor from '../components/WinPredictor'
 
 export default function TournamentDetail() {
     const { id } = useParams()
+    const { user } = useAuth()
     const [tournament, setTournament] = useState(null)
     const [allPlayers, setAllPlayers] = useState([])
     const [allBots, setAllBots] = useState([])
@@ -52,6 +55,7 @@ export default function TournamentDetail() {
 
     const participantName = (pid) => {
         if (!pid || pid === 'BYE') return 'BYE'
+        if (pid === 'TBD') return 'TBD'
         if (pid.startsWith('bot:')) {
             const bot = allBots.find(b => b.id === pid.slice(4))
             return bot ? `🤖 ${bot.name}` : 'Unknown Bot'
@@ -75,6 +79,16 @@ export default function TournamentDetail() {
             load()
         } catch (err) {
             alert(err.response?.data?.detail || 'Registration failed')
+        }
+    }
+
+    const handleUnregister = async (participantId) => {
+        if (!confirm('Remove this participant from the tournament?')) return
+        try {
+            await unregisterFromTournament(id, participantId)
+            load()
+        } catch (err) {
+            alert(err.response?.data?.detail || 'Unregister failed')
         }
     }
 
@@ -277,17 +291,59 @@ export default function TournamentDetail() {
     const statusColors = { upcoming: '#3b82f6', active: '#10b981', completed: '#64748b' }
 
     // Organize matches by round
-    const matchesByRound = {}
-    if (t.matches) {
+    let matchesByRound = {}
+    let effectiveTotalRounds = 0;
+
+    if (hasBracket && t.matches) {
         t.matches.forEach(m => {
             const r = m.round_num || 0
             if (!matchesByRound[r]) matchesByRound[r] = []
             matchesByRound[r].push(m)
         })
         Object.values(matchesByRound).forEach(arr => arr.sort((a, b) => (a.match_index || 0) - (b.match_index || 0)))
+        effectiveTotalRounds = t.total_rounds || Object.keys(matchesByRound).length
+    } else if (t.status === 'upcoming' && t.format !== 'group_stage') {
+        const validPids = (t.registered_players || []).filter(pid => 
+            pid.startsWith('bot:') ? allBots.some(b => b.id === pid.slice(4)) : allPlayers.some(p => p.id === pid)
+        );
+        const pids = validPids;
+        effectiveTotalRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, pids.length))));
+        const previewBracketSize = Math.pow(2, effectiveTotalRounds);
+        const paddedPids = [...pids, ...Array(previewBracketSize - pids.length).fill('TBD')];
+        
+        let currentRoundMatches = [];
+        for (let i = 0; i < previewBracketSize; i += 2) {
+            currentRoundMatches.push({
+                id: `preview-0-${i/2}`,
+                round_num: 0,
+                match_index: i / 2,
+                player_white_id: paddedPids[i],
+                player_black_id: paddedPids[i+1],
+                status: 'scheduled',
+                is_preview: true
+            });
+        }
+        matchesByRound[0] = currentRoundMatches;
+        
+        for (let r = 1; r < effectiveTotalRounds; r++) {
+            const nextRound = [];
+            for (let i = 0; i < currentRoundMatches.length; i += 2) {
+                nextRound.push({
+                    id: `preview-${r}-${i/2}`,
+                    round_num: r,
+                    match_index: i / 2,
+                    player_white_id: 'TBD',
+                    player_black_id: 'TBD',
+                    status: 'scheduled',
+                    is_preview: true
+                });
+            }
+            matchesByRound[r] = nextRound;
+            currentRoundMatches = nextRound;
+        }
     }
 
-    const totalRounds = t.total_rounds || Object.keys(matchesByRound).length
+    const totalRounds = effectiveTotalRounds;
     const roundName = (r) => {
         if (r === totalRounds - 1) return '🏆 Final'
         if (r === totalRounds - 2) return 'Semi-Final'
@@ -349,10 +405,10 @@ export default function TournamentDetail() {
                         </div>
                     </div>
                     <div className="flex gap-2 flex-wrap">
-                        {t.status === 'upcoming' && (registeredPlayers.length + registeredBots.length) >= 2 && t.format !== 'group_stage' && (
+                        {t.status === 'upcoming' && user?.role === 'ADMIN' && t.format !== 'group_stage' && (
                             <button onClick={handleGenerateBracket} className="btn-gold text-xs">🏆 Generate Bracket</button>
                         )}
-                        {t.status === 'upcoming' && (registeredPlayers.length + registeredBots.length) >= 4 && t.format === 'group_stage' && (
+                        {t.status === 'upcoming' && user?.role === 'ADMIN' && t.format === 'group_stage' && (
                             <button onClick={handleGenerateGroups} className="btn-gold text-xs">🏟️ Generate Groups</button>
                         )}
                         {t.status === 'upcoming' && (
@@ -376,17 +432,27 @@ export default function TournamentDetail() {
                     {(registeredPlayers.length + registeredBots.length) > 0 ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                             {registeredPlayers.map(p => (
-                                <div key={p.id} className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                                        style={{ background: p.avatar_color }}>{p.name.charAt(0).toUpperCase()}</div>
-                                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{p.name}</span>
+                                <div key={p.id} className="flex items-center gap-2 p-2 rounded-lg group" style={{ background: 'var(--bg-secondary)' }}>
+                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                                        style={{ background: p.avatar_color || '#8b5cf6' }}>{(p.name || p.username || 'U').charAt(0).toUpperCase()}</div>
+                                    <span className="text-sm font-medium truncate flex-1" style={{ color: 'var(--text-primary)' }}>{p.name || p.username}</span>
+                                    {t.status === 'upcoming' && (
+                                        <button onClick={() => handleUnregister(p.id)} className="text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/20 rounded shrink-0">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                             {registeredBots.map(b => (
-                                <div key={b.id} className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs"
+                                <div key={b.id} className="flex items-center gap-2 p-2 rounded-lg group" style={{ background: 'var(--bg-secondary)' }}>
+                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs shrink-0"
                                         style={{ background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', color: 'white' }}>🤖</div>
-                                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{b.name}</span>
+                                    <span className="text-sm font-medium truncate flex-1" style={{ color: 'var(--text-primary)' }}>{b.name}</span>
+                                    {t.status === 'upcoming' && (
+                                        <button onClick={() => handleUnregister(`bot:${b.id}`)} className="text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/20 rounded shrink-0">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -550,9 +616,9 @@ export default function TournamentDetail() {
                                 <div className="card p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
                                     <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>🔄 Swap Bot</h2>
                                     <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>Swapping for: <strong>{participantName(swapParticipant)}</strong></p>
-                                    <select className="input-field mb-3" value={swapNewBot} onChange={e => setSwapNewBot(e.target.value)}>
-                                        <option value="">Select new bot…</option>
-                                        {allBots.map(b => <option key={b.id} value={b.id}>{b.name} {b.owner ? `(${b.owner})` : ''}</option>)}
+                                    <select className="glass-input w-full bg-black/40 text-white border-white/10 mb-3" value={swapNewBot} onChange={e => setSwapNewBot(e.target.value)}>
+                                        <option value="" className="bg-black text-slate-400">Select new bot…</option>
+                                        {allBots.map(b => <option key={b.id} value={b.id} className="bg-black text-white">{b.name} {b.owner ? `(${b.owner})` : ''}</option>)}
                                     </select>
                                     <div className="flex gap-2">
                                         <button onClick={() => setShowSwapModal(false)} className="btn-secondary flex-1">Cancel</button>
@@ -681,9 +747,9 @@ export default function TournamentDetail() {
             )}
 
             {/* Knockout Bracket */}
-            {hasBracket && (
+            {(hasBracket || (t.status === 'upcoming' && t.format !== 'group_stage')) && (
                 <div className="card p-6">
-                    <h2 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>🏆 Knockout Bracket</h2>
+                    <h2 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>🏆 Knockout Bracket {!hasBracket && <span className="text-sm font-normal text-amber-500 ml-2">(Live Preview)</span>}</h2>
                     <div className="overflow-x-auto">
                         <div className="flex gap-8 min-w-max py-2">
                             {Array.from({ length: totalRounds }, (_, r) => {
@@ -701,46 +767,48 @@ export default function TournamentDetail() {
                                             {matches.map(m => {
                                                 const isDone = m.status === 'completed'
                                                 const isBye = m.player_black_id === 'BYE'
-                                                const canPlay = m.status === 'scheduled' && !activeMatch
+                                                const canPlay = m.status === 'scheduled' && !activeMatch && !m.is_preview
+                                                
+                                                const wName = m.player_white_name || participantName(m.player_white_id)
+                                                const bName = isBye ? 'BYE' : (m.player_black_name || participantName(m.player_black_id))
 
                                                 return (
-                                                    <div key={m.id} className={`rounded-xl border transition-all duration-200 ${isDone ? 'opacity-80' : ''}`}
+                                                    <div key={m.id} className={`rounded-xl border transition-all duration-200 overflow-hidden relative ${isDone ? 'opacity-90' : ''}`}
                                                         style={{
-                                                            borderColor: isDone ? '#10b98133' : canPlay ? '#3b82f6' : 'var(--border-color)',
+                                                            borderColor: isDone ? '#10b98133' : canPlay ? '#3b82f6' : m.is_preview ? 'rgba(255,255,255,0.05)' : 'var(--border-color)',
                                                             background: isDone ? 'var(--bg-secondary)' : 'var(--bg-primary)',
+                                                            boxShadow: canPlay ? '0 0 10px rgba(59,130,246,0.3)' : 'none',
                                                         }}>
+                                                        {/* Play Button Overlay for Admins */}
+                                                        {canPlay && user?.role === 'ADMIN' && (
+                                                            <div className="absolute inset-y-0 right-0 flex items-center pr-2">
+                                                                <button onClick={() => startMatch(m)} className="px-2 py-1 rounded text-xs font-bold text-white shadow-lg z-10 hover:scale-105 transition-transform"
+                                                                    style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}>▶ Play</button>
+                                                            </div>
+                                                        )}
                                                         {/* White */}
                                                         <div className="flex items-center gap-2 px-3 py-2 border-b"
                                                             style={{
                                                                 borderColor: 'var(--border-color)',
                                                                 background: isDone && m.winner === 'white' ? 'rgba(16,185,129,0.05)' : undefined,
                                                             }}>
-                                                            <div className="w-4 h-4 rounded-full bg-white border border-slate-300 shrink-0" />
-                                                            <span className={`text-xs font-semibold flex-1 truncate ${isDone && m.winner !== 'white' && m.winner !== 'draw' ? 'line-through opacity-50' : ''}`}
+                                                            <div className="w-3 h-3 rounded-full bg-white border border-slate-300 shrink-0" />
+                                                            <span className={`text-xs font-semibold flex-1 truncate ${isDone && m.winner !== 'white' && m.winner !== 'draw' ? 'line-through opacity-40' : ''}`}
                                                                 style={{ color: isDone && m.winner === 'white' ? '#10b981' : 'var(--text-primary)' }}>
-                                                                {m.player_white_name || participantName(m.player_white_id)}
+                                                                {wName}
                                                             </span>
-                                                            {isDone && <span className="text-xs font-bold" style={{ color: m.winner === 'white' ? '#10b981' : 'var(--text-muted)' }}>{m.white_score}</span>}
-                                                            {isDone && m.winner === 'white' && <span className="text-[10px]">✓</span>}
+                                                            <span className="text-xs font-extrabold w-6 text-right" style={{ color: isDone && m.winner === 'white' ? '#10b981' : 'var(--text-muted)' }}>{isDone ? m.white_score : '-'}</span>
                                                         </div>
                                                         {/* Black */}
                                                         <div className="flex items-center gap-2 px-3 py-2"
                                                             style={{ background: isDone && m.winner === 'black' ? 'rgba(16,185,129,0.05)' : undefined }}>
-                                                            <div className="w-4 h-4 rounded-full bg-red-600 border border-red-400 shrink-0" />
-                                                            <span className={`text-xs font-semibold flex-1 truncate ${isDone && m.winner !== 'black' && m.winner !== 'draw' ? 'line-through opacity-50' : ''} ${isBye ? 'italic opacity-40' : ''}`}
+                                                            <div className="w-3 h-3 rounded-full bg-red-600 border border-red-400 shrink-0" />
+                                                            <span className={`text-xs font-semibold flex-1 truncate ${isDone && m.winner !== 'black' && m.winner !== 'draw' ? 'line-through opacity-40' : ''} ${isBye ? 'italic opacity-40' : ''}`}
                                                                 style={{ color: isDone && m.winner === 'black' ? '#10b981' : 'var(--text-primary)' }}>
-                                                                {isBye ? 'BYE' : (m.player_black_name || participantName(m.player_black_id))}
+                                                                {bName}
                                                             </span>
-                                                            {isDone && !isBye && <span className="text-xs font-bold" style={{ color: m.winner === 'black' ? '#10b981' : 'var(--text-muted)' }}>{m.black_score}</span>}
-                                                            {isDone && m.winner === 'black' && <span className="text-[10px]">✓</span>}
+                                                            {!isBye && <span className="text-xs font-extrabold w-6 text-right" style={{ color: isDone && m.winner === 'black' ? '#10b981' : 'var(--text-muted)' }}>{isDone ? m.black_score : '-'}</span>}
                                                         </div>
-                                                        {canPlay && (
-                                                            <button onClick={() => startMatch(m)}
-                                                                className="w-full text-center py-1.5 text-xs font-bold rounded-b-xl transition-colors"
-                                                                style={{ background: 'rgba(99,102,241,0.1)', color: '#3b82f6' }}>
-                                                                ▶ Play Now
-                                                            </button>
-                                                        )}
                                                         {isDone && !isBye && (
                                                             <div className="text-center py-1 text-[10px] font-semibold" style={{ color: '#10b981' }}>✓ Complete</div>
                                                         )}
@@ -837,9 +905,9 @@ export default function TournamentDetail() {
                                 <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>All players are already registered!</p>
                             ) : (
                                 <div className="space-y-3">
-                                    <select className="input-field" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
-                                        <option value="">Select a player</option>
-                                        {unregisteredPlayers.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                                    <select className="glass-input w-full bg-black/40 text-white border-white/10" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
+                                        <option value="" className="bg-black text-slate-400">Select a player</option>
+                                        {unregisteredPlayers.map(p => (<option key={p.id} value={p.id} className="bg-black text-white">{p.name}</option>))}
                                     </select>
                                     <div className="flex gap-2">
                                         <button onClick={() => setShowRegister(false)} className="btn-secondary flex-1">Cancel</button>
@@ -854,9 +922,9 @@ export default function TournamentDetail() {
                                 </p>
                             ) : (
                                 <div className="space-y-3">
-                                    <select className="input-field" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
-                                        <option value="">Select a bot</option>
-                                        {unregisteredBots.map(b => (<option key={b.id} value={b.id}>{b.name} {b.owner ? `(${b.owner})` : ''}</option>))}
+                                    <select className="glass-input w-full bg-black/40 text-white border-white/10" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
+                                        <option value="" className="bg-black text-slate-400">Select a bot</option>
+                                        {unregisteredBots.map(b => (<option key={b.id} value={b.id} className="bg-black text-white">{b.name} {b.owner ? `(${b.owner})` : ''}</option>))}
                                     </select>
                                     <div className="flex gap-2">
                                         <button onClick={() => setShowRegister(false)} className="btn-secondary flex-1">Cancel</button>

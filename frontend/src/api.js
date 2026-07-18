@@ -5,6 +5,24 @@ const api = axios.create({
     timeout: 10000,
 })
 
+// Request Interceptor: Attach token to headers
+api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+}, (error) => Promise.reject(error));
+
+// Response Interceptor: Handle 401 Unauthorized
+api.interceptors.response.use((response) => response, (error) => {
+    if (error.response && error.response.status === 401) {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+    }
+    return Promise.reject(error);
+});
+
 // ---- Players ----
 export const createPlayer = (data) => api.post('/players', data)
 export const getPlayers = () => api.get('/players')
@@ -24,6 +42,8 @@ export const registerForTournament = (tid, playerId) =>
     api.post(`/tournaments/${tid}/register?player_id=${playerId}`)
 export const registerBotForTournament = (tid, botId) =>
     api.post(`/tournaments/${tid}/register-bot?bot_id=${botId}`)
+export const unregisterFromTournament = (tid, participantId) =>
+    api.post(`/tournaments/${tid}/unregister?participant_id=${participantId}`)
 export const generateBracket = (tid) =>
     api.post(`/tournaments/${tid}/generate-bracket`)
 // Group Stage
@@ -69,6 +89,7 @@ export const uploadLocalBot = (formData) =>
     api.post('/bots/upload-local', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     })
+export const createInlineBot = (data) => api.post('/bots/inline', data)
 export const runBotGame = (params) =>
     api.post('/game/bot-game/run', null, { params, timeout: 60000 })
 

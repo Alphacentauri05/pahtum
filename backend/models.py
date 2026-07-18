@@ -1,108 +1,78 @@
-"""
-Pydantic models for request/response schemas.
-"""
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Dict
 from datetime import datetime
+from enum import Enum
 
+# Roles
+class Role(str, Enum):
+    ADMIN = "ADMIN"
+    USER = "USER"
 
-# ---------- Players ----------
-class PlayerCreate(BaseModel):
-    name: str
-    email: str
-    avatar_color: str = "#6366f1"
+# User Models
+class UserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
 
-
-class PlayerOut(BaseModel):
+class UserResponse(BaseModel):
     id: str
-    name: str
-    email: str
-    avatar_color: str
-    wins: int = 0
-    losses: int = 0
-    draws: int = 0
-    total_score: int = 0
-    matches_played: int = 0
-    created_at: datetime
+    username: str
+    email: EmailStr
+    role: Role
+    created_at: str
 
+class UserInDB(UserResponse):
+    password_hash: str
 
-# ---------- Tournaments ----------
-class TournamentCreate(BaseModel):
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+# Bot Models
+class BotCreate(BaseModel):
     name: str
     description: str = ""
-    board_size: int = 7
-    max_players: int = 16
-    start_date: Optional[str] = None
-    format: str = "knockout"  # "knockout" or "group_stage"
 
-
-class TournamentOut(BaseModel):
+class BotResponse(BaseModel):
     id: str
+    owner_id: str
     name: str
     description: str
-    board_size: int
+    active: bool
+    created_at: str
+
+# Tournament Models
+class TournamentCreate(BaseModel):
+    name: str
+    format: str = "single_elimination"
+
+class TournamentResponse(BaseModel):
+    id: str
+    name: str
+    format: str
     status: str
-    max_players: int
-    registered_players: list[str]
-    player_count: int = 0
-    created_at: datetime
-    start_date: Optional[str] = None
+    created_at: str
 
+class Registration(BaseModel):
+    bot_id: str
 
-# ---------- Matches ----------
+# Match & Game Models
 class MatchCreate(BaseModel):
     tournament_id: Optional[str] = None
     player_white_id: str
-    player_black_id: str  # can be "AI"
+    player_black_id: str
     board_size: int = 7
     round_num: int = 0
     match_index: int = 0
 
-
-class MatchOut(BaseModel):
-    id: str
-    tournament_id: Optional[str]
-    player_white_id: str
-    player_black_id: str
-    player_white_name: str = ""
-    player_black_name: str = ""
-    board_size: int
-    status: str
-    white_score: int = 0
-    black_score: int = 0
-    winner: Optional[str] = None
-    moves: list[dict] = []
-    played_at: Optional[datetime] = None
-    created_at: datetime
-
-
-# ---------- Bots ----------
-class BotCreate(BaseModel):
-    name: str
-    api_url: str
-    owner: str = ""
-    description: str = ""
-
-
-class LocalBotCreate(BaseModel):
-    """Register a local Python bot (module + function) instead of an HTTP URL."""
-    name: str
-    module: str  # e.g. "team7" or "team_bots.team7_algo1"
-    entry_function: str = "bot_move"
-    owner: str = ""
-    description: str = ""
-
-
-# ---------- Game ----------
 class GameCreate(BaseModel):
     board_size: int = 7
-    mode: str = "pvp"  # "pvp", "vs_ai", or "bot_vs_bot"
-    player_white: str = "Player 1"
-    player_black: str = "Player 2"
-    match_id: Optional[str] = None
+    mode: str
+    player_white: str
+    player_black: str
     bot_white_id: Optional[str] = None
     bot_black_id: Optional[str] = None
-
+    match_id: Optional[str] = None
 
 class MoveRequest(BaseModel):
     row: int

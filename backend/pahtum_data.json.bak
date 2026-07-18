@@ -1,0 +1,32 @@
+{
+  "users": [
+    {
+      "id": "477275cf46d547d4becbba84",
+      "created_at": "2026-07-16T16:42:46.701026+00:00",
+      "username": "uday",
+      "email": "udaysharma051203@gmail.com",
+      "password_hash": "$2b$12$jB8AB66ZdrBSElH6ZwJESuFPeIMdN2fKAvvvg7wBu.8pP.9Z39b0G",
+      "role": "ADMIN"
+    },
+    {
+      "username": "harsh",
+      "email": "harsh@gmail.com",
+      "password_hash": "$2b$12$wRlee/OSGqNnwM7Bv7D9pOxiuqHSKLi5c5D19FntZTQdlkzGQYKSm",
+      "role": "USER",
+      "id": "c962f90adb6d49d396c7e392",
+      "created_at": "2026-07-16T17:01:23.979002+00:00"
+    }
+  ],
+  "tournaments": [
+    {
+      "name": "maharaja series",
+      "format": "knockout",
+      "status": "upcoming",
+      "registered_players": [],
+      "rounds": [],
+      "board_size": 7,
+      "id": "8aa6a287693142599b30e986",
+      "created_at": "2026-07-16T17:00:50.677184+00:00"
+    }
+  ]
+}
