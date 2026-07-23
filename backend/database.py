@@ -13,7 +13,8 @@ def _new_id():
     return uuid.uuid4().hex[:24]
 
 DB_DIR = Path(__file__).parent / "data"
-MONGO_URL = "mongodb://localhost:27017"
+# Use environment variable if set (for deployment), otherwise default to your Atlas cluster
+MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://kushi:uday2003@cluster0.z35yzc7.mongodb.net/?appName=Cluster0")
 DB_NAME = "pahtum"
 
 class MongoDBClient:
